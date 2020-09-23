@@ -1,0 +1,184 @@
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: usnpi
+  labels:
+    app: db
+  annotations:
+    volume.beta.kubernetes.io/storage-class: standard
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi
+
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: usnpi-cache
+  labels:
+    app: db
+  annotations:
+    volume.beta.kubernetes.io/storage-class: standard
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: npi-db
+  labels:
+    system: usnpi
+    service: usnpi-db
+    environment: master
+  namespace: default
+spec:
+  ports:
+  - protocol: TCP
+    port: <DB_PORT>
+    targetPort: <DB_PORT>
+  selector:
+    service: usnpi-db
+    environment: master
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: npi
+  labels:
+    system: usnpi
+    service: usnpi-web
+    environment: master
+  namespace: default
+spec:
+  ports:
+  - name: usnpi
+    port: 80
+    protocol: TCP
+    targetPort: <PORT>
+  selector:
+    service: usnpi-web
+    environment: master
+
+
+
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: usnpi-db
+  labels:
+    system: usnpi
+    service: usnpi-db
+    environment: master
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      system: usnpi
+      service: usnpi-db
+      environment: master
+  template:
+    metadata:
+      labels:
+        system: usnpi
+        service: usnpi-db
+        environment: master
+    spec:
+      volumes:
+      - name: usnpi
+        persistentVolumeClaim:
+          claimName: usnpi
+      - name: import
+        persistentVolumeClaim:
+          claimName: usnpi-cache
+      - name: dshm
+        emptyDir:
+          medium: Memory
+      containers:
+      - name: pg
+        image: postgres:10
+        imagePullPolicy: Always
+        args: ["postgres", "-c", "shared_buffers=<DB_SHARED_BUFFERS>"]
+        volumeMounts:
+        - name: usnpi
+          mountPath: /data
+          subPath: pgdata
+        - name: import
+          mountPath: /import
+        - mountPath: /dev/shm
+          name: dshm
+        env:
+        - name: POSTGRES_USER
+          value: "<DB_USER>"
+        - name: POSTGRES_DB
+          value: "<DB_DATABASE>"
+        - name: PGDATA
+          value: "/data"
+        - name: POSTGRES_PASSWORD
+          value: "<DB_PASSWORD>"
+        ports:
+        - containerPort: <DB_PORT>
+          protocol: TCP
+        resources:
+          requests:
+            cpu: "2"
+            memory: 8000Mi
+
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: usnpi
+  labels:
+    system: usnpi
+    service: usnpi-web
+    environment: master
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      system: usnpi
+      service: usnpi-web
+      environment: master
+  template:
+    metadata:
+      labels:
+        system: usnpi
+        service: usnpi-web
+        environment: master
+    spec:
+      containers:
+      - name: web
+        image: "<IMAGE>"
+        imagePullPolicy: Always
+        env:
+        - name: PORT
+          value: "<PORT>"
+        - name: GIT_COMMIT
+          value: "<GIT_COMMIT>"
+        - name: DB_HOST
+          value: "<DB_HOST>"
+        - name: DB_PORT
+          value: "<DB_PORT>"
+        - name: DB_DATABASE
+          value: "<DB_DATABASE>"
+        - name: DB_USER
+          value: "<DB_USER>"
+        - name: DB_PASSWORD
+          value: "<DB_PASSWORD>"
+        - name: API_OPS
+          value: "<API_OPS>"
+        ports:
+        - containerPort: <PORT>
+          protocol: TCP
